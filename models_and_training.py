@@ -38,11 +38,11 @@ def get_optimizer(
         ]
     else:
         raise ValueError(f"Unknown layer selection: {layer}")
-    
+
     if optimizer_name == "adam":
         if layer == "fc":
             return Adam(params, lr=fc_learning_rate)
-        else:  
+        else:
             return Adam(params)
 
     elif optimizer_name == "sgd":
@@ -52,8 +52,13 @@ def get_optimizer(
             return SGD(params, momentum=momentum)
 
 
-def get_pre_trained_resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1):
+def get_pre_trained_resnet18(
+    weights=models.ResNet18_Weights.IMAGENET1K_V1, model_name="default_resnet18"
+):
     model = models.resnet18(weights=weights)
+    model.name = model_name
+    logger = log.get_model_logger(model_name=model.name)
+    logger.info("Loaded resnet18 architecture")
     model = replace_fc(model)
     model.to(device=DEVICE)
     model.class_names = ["Bubbly", "Slug", "Churn", "Taylor"]
@@ -140,7 +145,9 @@ def train_model_for_epochs(
     optimizer,
     prior_performance_data=None,
 ):
-    all_performance_data = [] if prior_performance_data is None else list(prior_performance_data)
+    all_performance_data = (
+        [] if prior_performance_data is None else list(prior_performance_data)
+    )
     for epoch in range(starting_epoch, starting_epoch + number_of_epochs_to_train):
         model, performance_data = train_loop(
             dataloader=dataloader,
@@ -200,20 +207,20 @@ def save_model(model):
 
 def load_model(model_name="default_resnet18", new_model=True):
     if model_name == "default_resnet18":
-        model = get_pre_trained_resnet18()
-        model.name = "default_resnet18"
+        model = get_pre_trained_resnet18(model_name=model_name)
         logger = log.get_model_logger(model_name=model.name)
         logger.info(f"Loaded: {model.name}")
     elif new_model:
-        model = get_pre_trained_resnet18()
-        model.name = model_name
+        model = get_pre_trained_resnet18(model_name=model_name)
         logger = log.get_model_logger(model_name=model.name)
         logger.info(
-            f"Created {model.name} from pre_trained_resnet18, if you have previously saved weights to this model name they will be overwritten if you continue"
+            f"Created {model.name} from pre_trained_resnet18.\n"
+            "If you have previously saved weights to this model name,\n"
+            "they will be overwritten if you continue.\n"
+            "Quit (Ctrl+C) and pass the --load-existing argument if you do not want this to happen."
         )
     else:
-        model = get_pre_trained_resnet18(weights=None)
-        model.name = model_name
+        model = get_pre_trained_resnet18(weights=None, model_name=model_name)
         model_weights = model_name + "_weights.pth"
         path = SAVED_MODEL_DIR / model.name / "weights" / model_weights
         state = torch.load(path, map_location=DEVICE)

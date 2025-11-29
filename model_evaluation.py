@@ -49,12 +49,17 @@ def test_loop(dataloader, model, loss_fn,):
     cm = confusion_matrix(all_labels, all_preds)
     return cm
 
-def plot_confusion_matrix(model, cm, plt_name=None, save_plot=False, normalize=True):
-    plt.figure(figsize=(8, 6))
+def plot_confusion_matrix(model, cm, plt_name=None, save_plot=False, normalize=True, show_plot=True):
+    """Plot (and optionally save) a confusion matrix for a given model."""
 
+    # Create a new figure and axes
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    # Normalize if requested
     if normalize:
         cm = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis]
 
+    # Plot heatmap on the specific axis
     sns.heatmap(
         cm,
         annot=True,
@@ -62,18 +67,34 @@ def plot_confusion_matrix(model, cm, plt_name=None, save_plot=False, normalize=T
         cmap="Blues",
         xticklabels=model.class_names,
         yticklabels=model.class_names,
+        ax=ax,
     )
 
-    plt.xlabel("Predicted")
-    plt.ylabel("True")
-    plt.title("Confusion Matrix" + (" (Normalized)" if normalize else ""))
+    ax.set_xlabel("Predicted")
+    ax.set_ylabel("True")
+    ax.set_title("Confusion Matrix" + (" (Normalized)" if normalize else ""))
 
-    plt.tight_layout()
-    plt.show()
+    fig.tight_layout()
 
+    # Save before (or independent of) show
     if save_plot:
         subdirectory = SAVED_MODEL_DIR / model.name / "confusion matrix plots"
         subdirectory.mkdir(parents=True, exist_ok=True)
-        plt_name = plt_name + ".png"
+
+        # Default name if none provided
+        if plt_name is None:
+            plt_name = "confusion_matrix_normalized" if normalize else "confusion_matrix"
+
+        if not plt_name.endswith(".png"):
+            plt_name += ".png"
+
         path = subdirectory / plt_name
-        plt.savefig(path, dpi=300)
+        fig.savefig(path, dpi=300)
+        print(f"Confusion matrix saved to: {path}")
+
+    # Show the plot (optional, so Colab / scripts can disable it)
+    if show_plot:
+        plt.show()
+
+    # Free the figure from memory
+    plt.close(fig)

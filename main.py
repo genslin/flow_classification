@@ -122,11 +122,12 @@ def get_args():
         dest="new_model",
         help="Load existing model weights instead of creating a new model.",
     )
-    
+
     parser.add_argument(
         "--loss-fn-name",
         type=str,
         default="CrossEntropyLoss",
+        choices=["CrossEntropyLoss", "NLLLoss"],
         help="Loss function to use: CrossEntropyLoss or NLLLoss (default: CrossEntropyLoss).",
     )
 
