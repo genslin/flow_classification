@@ -3,7 +3,6 @@ import numpy as np
 from sklearn.model_selection import StratifiedShuffleSplit
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader, Subset
-import torch
 
 PROJECT_ROOT = Path.cwd().resolve()
 DATA_DIR = PROJECT_ROOT / "data"
@@ -104,7 +103,6 @@ def get_train_transform(
     normalize_mean=[0.485, 0.456, 0.406],
     normalize_std=[0.229, 0.224, 0.225],
 ):
-
     train_tf = transforms.Compose(
         [
             transforms.Resize(image_size),
@@ -184,9 +182,61 @@ def get_train_val_test_dataloaders(
     )
     return train_loader, val_loader, test_loader
 
+
 def get_quick_test_loader():
     _, _, test_idx = get_train_val_test_indices()
     _, _, sub = get_train_val_test_subsets(test_idx, test_idx, test_idx)
     _, _, sub = set_train_val_test_subset_transforms(sub, sub, sub)
     _, _, loader = get_train_val_test_dataloaders(sub, sub, sub)
     return loader
+
+
+def get_dataloaders_complete_preprocessing(
+    test_size=0.15,
+    val_size=0.15,
+    rng=42,
+    image_size=(224, 224),
+    random_rotation=10,
+    brightness_jitter=0.2,
+    contrast_jitter=0.2,
+    normalize_mean=[0.485, 0.456, 0.406],
+    normalize_std=[0.229, 0.224, 0.225],
+    batch_size=32,
+    num_workers=2,
+    pin_memory=True,
+):
+    train_idx, val_idx, test_idx = get_train_val_test_indices(
+        test_size=test_size, val_size=val_size, rng=rng
+    )
+    train_transform = get_train_transform(
+        image_size=image_size,
+        random_rotation=random_rotation,
+        brightness_jitter=brightness_jitter,
+        contrast_jitter=contrast_jitter,
+        normalize_mean=normalize_mean,
+        normalize_std=normalize_std,
+    )
+    eval_transform = get_evaluation_transform(
+        image_size=image_size,
+        normalize_mean=normalize_mean,
+        normalize_std=normalize_std,
+    )
+    train_ds, val_ds, test_ds = get_train_val_test_subsets(
+        train_idx=train_idx, val_idx=val_idx, test_idx=test_idx
+    )
+    train_ds, val_ds, test_ds = set_train_val_test_subset_transforms(
+        train_ds=train_ds,
+        val_ds=val_ds,
+        test_ds=test_ds,
+        train_tf=train_transform,
+        eval_tf=eval_transform,
+    )
+    train_loader, val_loader, test_loader = get_train_val_test_dataloaders(
+        train_ds=train_ds,
+        val_ds=val_ds,
+        test_ds=test_ds,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
+    return train_loader, val_loader, test_loader

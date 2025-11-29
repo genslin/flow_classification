@@ -1,0 +1,425 @@
+import argparse
+import preprocessing
+import models_and_training
+import logging_functions as log
+import model_evaluation
+
+
+def get_args():
+    parser = argparse.ArgumentParser(
+        description="Flow Regime Classifier — Training and Evaluation Pipeline"
+    )
+
+    # ====================================================================
+    # Dataset Split Arguments
+    # ====================================================================
+    parser.add_argument(
+        "--test-size",
+        type=float,
+        default=0.15,
+        help="Fraction of dataset reserved for final testing (default: 0.15).",
+    )
+
+    parser.add_argument(
+        "--val-size",
+        type=float,
+        default=0.15,
+        help="Fraction of dataset reserved for validation during training (default: 0.15).",
+    )
+
+    parser.add_argument(
+        "--rng",
+        type=int,
+        default=42,
+        help="Random seed used for dataset shuffling and splits (default: 42).",
+    )
+
+    # ====================================================================
+    # Image Preprocessing Arguments
+    # ====================================================================
+    parser.add_argument(
+        "--image-size",
+        nargs=2,
+        type=int,
+        default=[224, 224],
+        help="Image resize dimensions: WIDTH HEIGHT (default: 224 224).",
+    )
+
+    parser.add_argument(
+        "--random-rotation",
+        type=float,
+        default=10.0,
+        help="Maximum rotation angle for random rotation augmentation (default: 10°).",
+    )
+
+    parser.add_argument(
+        "--brightness-jitter",
+        type=float,
+        default=0.2,
+        help="Brightness jitter strength for color augmentation (default: 0.2).",
+    )
+
+    parser.add_argument(
+        "--contrast-jitter",
+        type=float,
+        default=0.2,
+        help="Contrast jitter strength for color augmentation (default: 0.2).",
+    )
+
+    parser.add_argument(
+        "--normalize-mean",
+        nargs=3,
+        type=float,
+        default=[0.485, 0.456, 0.406],
+        help="Normalization mean for each RGB channel (default: 0.485 0.456 0.406).",
+    )
+
+    parser.add_argument(
+        "--normalize-std",
+        nargs=3,
+        type=float,
+        default=[0.229, 0.224, 0.225],
+        help="Normalization std dev for each RGB channel (default: 0.229 0.224 0.225).",
+    )
+
+    # ====================================================================
+    # DataLoader Arguments
+    # ====================================================================
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=2,
+        help="Number of subprocesses used for DataLoader workers (default: 2).",
+    )
+
+    parser.add_argument(
+        "--pin-memory",
+        action="store_true",
+        help="Use pinned memory in data loading (recommended when training on GPU).",
+    )
+
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=32,
+        help="Batch size for training, validation, and testing (default: 32).",
+    )
+
+
+    # ====================================================================
+    # Model Options
+    # ====================================================================
+    parser.add_argument(
+        "--model-name",
+        type=str,
+        default="default_resnet18",
+        help="Name assigned to the model for logging and saving (default: default_resnet18).",
+    )
+
+    parser.add_argument(
+        "--load-existing",
+        action="store_false",
+        dest="new_model",
+        help="Load existing model weights instead of creating a new model.",
+    )
+    
+    parser.add_argument(
+        "--loss-fn-name",
+        type=str,
+        default="CrossEntropyLoss",
+        help="Loss function to use: CrossEntropyLoss or NLLLoss (default: CrossEntropyLoss).",
+    )
+
+    parser.add_argument(
+        "--optimizer-name",
+        type=str,
+        default="Adam",
+        choices=["Adam", "SGD"],
+        help="Optimizer to use: Adam or SGD (default: Adam).",
+    )
+
+    # ====================================================================
+    # Optimizer Hyperparameters
+    # ====================================================================
+    parser.add_argument(
+        "--fc-learning-rate",
+        type=float,
+        default=1e-3,
+        help="Learning rate for the fully connected classification head (default: 0.001).",
+    )
+
+    parser.add_argument(
+        "--layer4-learning-rate",
+        type=float,
+        default=1e-4,
+        help="Learning rate for the last ResNet block during fine-tuning (default: 0.0001).",
+    )
+
+    parser.add_argument(
+        "--momentum",
+        type=float,
+        default=0.9,
+        help="Momentum value used for SGD optimizer (default: 0.9). Ignored for Adam.",
+    )
+
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    # ------------------------------------------------------------
+    # Parse all command-line arguments (dataset, model, optimizer)
+    # ------------------------------------------------------------
+    args = get_args()
+
+    # ------------------------------------------------------------
+    # Build train/val/test dataloaders with full preprocessing
+    # (resize, augmentations, normalization, batching, etc.)
+    #
+    # This returns 3 PyTorch DataLoader objects ready for training.
+    # ------------------------------------------------------------
+    train_loader, val_loader, test_loader = (
+        preprocessing.get_dataloaders_complete_preprocessing(
+            test_size=args.test_size,
+            val_size=args.val_size,
+            rng=args.rng,
+            image_size=tuple(args.image_size),  # convert list → tuple
+            random_rotation=args.random_rotation,
+            brightness_jitter=args.brightness_jitter,
+            contrast_jitter=args.contrast_jitter,
+            normalize_mean=args.normalize_mean,
+            normalize_std=args.normalize_std,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            pin_memory=args.pin_memory,
+        )
+    )
+
+    # ------------------------------------------------------------
+    # Load an existing model OR create a new one.
+    #   --model-name   = name assigned to this run
+    #   --new-model   = false → load existing weights
+    #
+    # The model object returned always has a .name attribute used
+    # for folder naming, logging, performance tracking, etc.
+    # ------------------------------------------------------------
+    model = models_and_training.load_model(
+        model_name=args.model_name, new_model=args.new_model
+    )
+
+    # ------------------------------------------------------------
+    # Load previous training history (if it exists).
+    # performance_data is a list of dicts:
+    #    [{"epoch": ..., "batch": ..., "loss": ...}, ...]
+    #
+    # If no CSV exists yet, a new empty list is returned.
+    # ------------------------------------------------------------
+    performance_data = models_and_training.load_performance_data(model)
+
+    # Determine the next epoch index.
+    # If performance_data is empty, start at epoch 0.
+    # If it contains past runs, continue from the last epoch + 1.
+    if performance_data:
+        starting_epoch = performance_data[-1]["epoch"] + 1
+    else:
+        starting_epoch = 0
+
+    # ------------------------------------------------------------
+    # Stage 1: Train only the final fully-connected (fc) layer.
+    # We freeze all backbone parameters and unfreeze only fc().
+    #
+    # This is a standard transfer-learning first step:
+    #   1. Freeze backbone (pre-trained features stay intact)
+    #   2. Train classification head only
+    # ------------------------------------------------------------
+    model = models_and_training.freeze_model_parameters(model=model)
+    model = models_and_training.unfreeze_fc(model=model)
+
+    # Get the chosen loss function (default: CrossEntropyLoss)
+    loss_fn = models_and_training.get_loss_fn(loss_fn_name=args.loss_fn_name)
+
+    # ------------------------------------------------------------
+    # INTERACTIVE TRAINING LOOP (Head Only)
+    #
+    # The user is asked if they want to train the head-only stage.
+    # If YES:
+    #    - The optimizer is created for the head only
+    #    - The user can train multiple rounds of N epochs
+    #    - Validation confusion matrices can be plotted after each round
+    # ------------------------------------------------------------
+    train_head_solo = (
+        input("Do you want to train the model head by itself? (Y/N)").strip().upper()
+    )
+
+    if train_head_solo == "Y":
+        continue_training_head = True
+
+        # Optimizer for the fully connected head
+        optimizer = models_and_training.get_optimizer(
+            model=model,
+            layer="fc",
+            optimizer_name=args.optimizer_name,
+            fc_learning_rate=args.fc_learning_rate,
+            momentum=args.momentum,
+        )
+
+        while continue_training_head:
+            # Ask user how many epochs to train for this round
+            epochs_to_train = int(input("Number of epochs to train: "))
+
+            # Log the training start
+            logger = log.get_model_logger(model_name=model.name)
+            logger.info(f"Training model head for {epochs_to_train} epochs")
+
+            # Train the model for the requested number of epochs
+            model, performance_data = models_and_training.train_model_for_epochs(
+                starting_epoch=starting_epoch,
+                number_of_epochs_to_train=epochs_to_train,
+                dataloader=train_loader,
+                model=model,
+                loss_fn=loss_fn,
+                optimizer=optimizer,
+                prior_performance_data=performance_data,
+            )
+
+            # Update epoch index for next round
+            starting_epoch += epochs_to_train
+
+            # Evaluate on validation set to check progress
+            confusion_matrix = model_evaluation.test_loop(
+                dataloader=val_loader,
+                model=model,
+                loss_fn=loss_fn,
+            )
+
+            # Optionally plot/save confusion matrix
+            plot_matrix = (
+                input("Do you want to plot the confusion matrix? (Y/N)").strip().upper()
+            )
+            if plot_matrix == "Y":
+                save_matrix = (
+                    input("Do you want to save the plot? (Y/N)").strip().upper()
+                )
+                if save_matrix == "Y":
+                    plt_name = input("Enter the name you want to save the plot with: ")
+                    model_evaluation.plot_confusion_matrix(
+                        model=model,
+                        cm=confusion_matrix,
+                        plt_name=plt_name,
+                        save_plot=True,
+                    )
+                else:
+                    model_evaluation.plot_confusion_matrix(
+                        model=model, cm=confusion_matrix, plt_name="", save_plot=False
+                    )
+
+            # Ask user if they want to continue training the head
+            more_head_training = input("Continue training head? (Y/N)").strip().upper()
+            if more_head_training == "N":
+                continue_training_head = False
+            # If input is invalid or "Y", just loop again
+
+    # ------------------------------------------------------------
+    # INTERACTIVE TRAINING LOOP (Fine-tune layer4 + head)
+    #
+    # If the user chooses, we unfreeze the last ResNet block (layer4)
+    # and jointly fine-tune it + the fc head.
+    #
+    # Again, this can run for multiple multi-epoch rounds.
+    # ------------------------------------------------------------
+    train_head_and_layer4 = (
+        input("Do you want to train layer 4 and the model head? (Y/N)").strip().upper()
+    )
+
+    if train_head_and_layer4 == "Y":
+        continue_training_layer4 = True
+
+        # Unfreeze last ResNet block (layer4)
+        model = models_and_training.unfreeze_last_block(model=model)
+
+        # Create optimizer with separate LR for layer4 and fc
+        optimizer = models_and_training.get_optimizer(
+            model=model,
+            layer="layer4",
+            optimizer_name=args.optimizer_name,
+            fc_learning_rate=args.fc_learning_rate,
+            layer4_learning_rate=args.layer4_learning_rate,
+            momentum=args.momentum,
+        )
+
+        while continue_training_layer4:
+            epochs_to_train = int(input("Number of epochs to train: "))
+            logger = log.get_model_logger(model_name=model.name)
+            logger.info(f"Training model head and layer4 for {epochs_to_train} epochs")
+
+            # Train for this round
+            model, performance_data = models_and_training.train_model_for_epochs(
+                starting_epoch=starting_epoch,
+                number_of_epochs_to_train=epochs_to_train,
+                dataloader=train_loader,
+                model=model,
+                loss_fn=loss_fn,
+                optimizer=optimizer,
+                prior_performance_data=performance_data,
+            )
+
+            starting_epoch += epochs_to_train
+
+            # Validate after this round
+            confusion_matrix = model_evaluation.test_loop(
+                dataloader=val_loader,
+                model=model,
+                loss_fn=loss_fn,
+            )
+
+            # Optional confusion matrix plotting
+            plot_matrix = (
+                input("Do you want to plot the confusion matrix? (Y/N)").strip().upper()
+            )
+            if plot_matrix == "Y":
+                save_matrix = (
+                    input("Do you want to save the plot? (Y/N)").strip().upper()
+                )
+                if save_matrix == "Y":
+                    plt_name = input("Enter the name you want to save the plot with: ")
+                    model_evaluation.plot_confusion_matrix(
+                        model=model,
+                        cm=confusion_matrix,
+                        plt_name=plt_name,
+                        save_plot=True,
+                    )
+                else:
+                    model_evaluation.plot_confusion_matrix(
+                        model=model, cm=confusion_matrix, plt_name="", save_plot=False
+                    )
+
+            # Ask user if they want another round of fine-tuning
+            more_training = input("Continue training model? (Y/N)").strip().upper()
+            if more_training == "N":
+                continue_training_layer4 = False
+
+    # ------------------------------------------------------------
+    # END OF TRAINING SESSION
+    #
+    # Ask the user whether to save:
+    #   - updated performance_data (as CSV)
+    #   - model weights (.pth)
+    #
+    # This always runs, no matter which training paths they followed.
+    # ------------------------------------------------------------
+    save_reply_valid = False
+    while not save_reply_valid:
+        save_model = (
+            input("Save model weights and performance data? (Y/N)").strip().upper()
+        )
+
+        if save_model == "Y":
+            save_reply_valid = True
+            models_and_training.save_performance_data(
+                performance_data=performance_data, model=model
+            )
+            models_and_training.save_model(model=model)
+
+        elif save_model == "N":
+            save_reply_valid = True
+
+    print("Session Ended")
