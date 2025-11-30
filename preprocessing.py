@@ -365,7 +365,7 @@ def get_test_dataloader_from_indices(
     test_ds = get_test_subset(test_idx=test_idx)
 
     # 3) Attach transform
-    train_ds, val_ds, test_ds = set_test_subset_transform(
+    test_ds = set_test_subset_transform(
         test_ds=test_ds,
         eval_tf=eval_transform,
     )

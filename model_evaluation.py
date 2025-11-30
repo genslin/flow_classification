@@ -145,7 +145,7 @@ def plot_performance_data(model, performance_data, save_plot=False, plot_name=No
     ax.grid(True)
 
     # Build save directory
-    subdirectory = SAVED_MODEL_DIR / model.name / "performance_data"
+    subdirectory = SAVED_MODEL_DIR / model.name / "performance data"
     subdirectory.mkdir(parents=True, exist_ok=True)
 
 
