@@ -3,9 +3,11 @@ import numpy as np
 from sklearn.model_selection import StratifiedShuffleSplit
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader, Subset
+import logging_functions as log
 
 PROJECT_ROOT = Path.cwd().resolve()
 DATA_DIR = PROJECT_ROOT / "data"
+SAVED_MODEL_DIR = PROJECT_ROOT / "saved_models"
 
 
 def get_train_val_test_indices(test_size=0.15, val_size=0.15, rng=42):
@@ -135,11 +137,20 @@ def get_evaluation_transform(
 
 
 def get_train_val_test_subsets(train_idx, val_idx, test_idx):
-    base_ds = datasets.ImageFolder(root=DATA_DIR)
-    train_ds = Subset(base_ds, train_idx)
-    val_ds = Subset(base_ds, val_idx)
-    test_ds = Subset(base_ds, test_idx)
+    base_ds_train = datasets.ImageFolder(root=DATA_DIR)
+    base_ds_val = datasets.ImageFolder(root=DATA_DIR)
+    base_ds_test = datasets.ImageFolder(root=DATA_DIR)
+
+    train_ds = Subset(base_ds_train, train_idx)
+    val_ds = Subset(base_ds_val, val_idx)
+    test_ds = Subset(base_ds_test, test_idx)
     return train_ds, val_ds, test_ds
+
+
+def get_test_subset(test_idx):
+    base_ds_test = datasets.ImageFolder(root=DATA_DIR)
+    test_ds = Subset(base_ds_test, test_idx)
+    return test_ds
 
 
 def set_train_val_test_subset_transforms(
@@ -155,6 +166,14 @@ def set_train_val_test_subset_transforms(
     test_ds.dataset.transform = eval_tf
     return train_ds, val_ds, test_ds
 
+def set_test_subset_transform(
+    test_ds, eval_tf=None
+):
+    if eval_tf is None:
+        eval_tf = get_evaluation_transform()
+
+    test_ds.dataset.transform = eval_tf
+    return test_ds
 
 def get_train_val_test_dataloaders(
     train_ds, val_ds, test_ds, batch_size=32, num_workers=2, pin_memory=True
@@ -182,6 +201,17 @@ def get_train_val_test_dataloaders(
     )
     return train_loader, val_loader, test_loader
 
+def get_test_dataloader(
+    test_ds, batch_size=32, num_workers=2, pin_memory=True
+):
+    test_loader = DataLoader(
+        test_ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
+    return test_loader
 
 def get_quick_test_loader():
     _, _, test_idx = get_train_val_test_indices()
@@ -239,4 +269,189 @@ def get_dataloaders_complete_preprocessing(
         num_workers=num_workers,
         pin_memory=pin_memory,
     )
+    train_loader.indices = train_idx
+    val_loader.indices = val_idx
+    test_loader.indices = test_idx
     return train_loader, val_loader, test_loader
+
+
+def get_dataloaders_from_indices(
+    train_idx,
+    val_idx,
+    test_idx,
+    image_size=(224, 224),
+    random_rotation=10,
+    brightness_jitter=0.2,
+    contrast_jitter=0.2,
+    normalize_mean=[0.485, 0.456, 0.406],
+    normalize_std=[0.229, 0.224, 0.225],
+    batch_size=32,
+    num_workers=2,
+    pin_memory=True,
+):
+    """
+    Recreate train/val/test DataLoaders from explicit indices into the
+    ImageFolder dataset at DATA_DIR.
+
+    This is the 'inverse' of get_dataloaders_complete_preprocessing when
+    you already know which samples belong in each split.
+    """
+    # 1) Build transforms from the same hyperparameters you used originally
+    train_transform = get_train_transform(
+        image_size=image_size,
+        random_rotation=random_rotation,
+        brightness_jitter=brightness_jitter,
+        contrast_jitter=contrast_jitter,
+        normalize_mean=normalize_mean,
+        normalize_std=normalize_std,
+    )
+    eval_transform = get_evaluation_transform(
+        image_size=image_size,
+        normalize_mean=normalize_mean,
+        normalize_std=normalize_std,
+    )
+
+    # 2) Build Subset objects using the provided indices
+    train_ds, val_ds, test_ds = get_train_val_test_subsets(
+        train_idx=train_idx, val_idx=val_idx, test_idx=test_idx
+    )
+
+    # 3) Attach transforms
+    train_ds, val_ds, test_ds = set_train_val_test_subset_transforms(
+        train_ds=train_ds,
+        val_ds=val_ds,
+        test_ds=test_ds,
+        train_tf=train_transform,
+        eval_tf=eval_transform,
+    )
+
+    # 4) Wrap in DataLoaders
+    train_loader, val_loader, test_loader = get_train_val_test_dataloaders(
+        train_ds=train_ds,
+        val_ds=val_ds,
+        test_ds=test_ds,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
+
+    return train_loader, val_loader, test_loader
+
+
+def get_test_dataloader_from_indices(
+    test_idx,
+    image_size=(224, 224),
+    normalize_mean=[0.485, 0.456, 0.406],
+    normalize_std=[0.229, 0.224, 0.225],
+    batch_size=32,
+    num_workers=2,
+    pin_memory=True,
+):
+    """
+    Recreate train/val/test DataLoaders from explicit indices into the
+    ImageFolder dataset at DATA_DIR.
+
+    This is the 'inverse' of get_dataloaders_complete_preprocessing when
+    you already know which samples belong in each split.
+    """
+    # 1) Build transforms from the same hyperparameters you used originally
+    eval_transform = get_evaluation_transform(
+        image_size=image_size,
+        normalize_mean=normalize_mean,
+        normalize_std=normalize_std,
+    )
+
+    # 2) Build Subset object using the provided indices
+    test_ds = get_test_subset(test_idx=test_idx)
+
+    # 3) Attach transform
+    train_ds, val_ds, test_ds = set_test_subset_transform(
+        test_ds=test_ds,
+        eval_tf=eval_transform,
+    )
+
+    # 4) Wrap in DataLoaders
+    test_loader = get_test_dataloader(
+        test_ds=test_ds,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
+
+    return test_loader
+
+
+def save_train_val_test_indices(train_loader, val_loader, test_loader, model):
+    subdirectory = SAVED_MODEL_DIR / model.name / "data splits"
+    subdirectory.mkdir(parents=True, exist_ok=True)
+    np.save(subdirectory / "train_idx.npy", train_loader.indices)
+    np.save(subdirectory / "val_idx.npy", val_loader.indices)
+    np.save(subdirectory / "test_idx.npy", test_loader.indices)
+    logger = log.get_model_logger(model_name=model.name)
+    logger.info("Training, validation, and test indices saved")
+
+
+def load_train_val_test_indices(model):
+    subdirectory = SAVED_MODEL_DIR / model.name / "data splits"
+    subdirectory.mkdir(parents=True, exist_ok=True)
+    train_idx = np.load(subdirectory / "train_idx.npy")
+    val_idx = np.load(subdirectory / "val_idx.npy")
+    test_idx = np.load(subdirectory / "test_idx.npy")
+    logger = log.get_model_logger(model_name=model.name)
+    logger.info("Training, validation, and test indices loaded")
+    return train_idx, val_idx, test_idx
+
+
+def load_train_val_test_dataloaders(
+    model,
+    image_size=(224, 224),
+    random_rotation=10,
+    brightness_jitter=0.2,
+    contrast_jitter=0.2,
+    normalize_mean=[0.485, 0.456, 0.406],
+    normalize_std=[0.229, 0.224, 0.225],
+    batch_size=32,
+    num_workers=2,
+    pin_memory=True,
+):
+    train_idx, val_idx, test_idx = load_train_val_test_indices(model)
+    train_loader, val_loader, test_loader = get_dataloaders_from_indices(
+        train_idx=train_idx,
+        val_idx=val_idx,
+        test_idx=test_idx,
+        image_size=image_size,
+        random_rotation=random_rotation,
+        brightness_jitter=brightness_jitter,
+        contrast_jitter=contrast_jitter,
+        normalize_mean=normalize_mean,
+        normalize_std=normalize_std,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
+    train_loader.indices = train_idx
+    val_loader.indices = val_idx
+    test_loader.indices = test_idx
+    return train_loader, val_loader, test_loader
+
+def load_test_dataloader(
+    model,
+    image_size=(224, 224),
+    normalize_mean=[0.485, 0.456, 0.406],
+    normalize_std=[0.229, 0.224, 0.225],
+    batch_size=32,
+    num_workers=2,
+    pin_memory=True,
+):
+    _, _, test_idx = load_train_val_test_indices(model)
+    test_loader = get_test_dataloader_from_indices(
+        test_idx=test_idx,
+        image_size=image_size,
+        normalize_mean=normalize_mean,
+        normalize_std=normalize_std,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
+    test_loader.indices = test_idx
+    return test_loader

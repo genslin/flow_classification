@@ -13,18 +13,30 @@ to download the needed dependencies, if you have gpu on your machine then you ca
 >>>uv sync --extra cu128
 ## Running the program
 >>>uv run main.py 
-followed by whatever arguments you are trying to manipulate starts the script.
+followed by one of the subcommands [train, test, plot, autotrain] and available arguments you are trying to manipulate starts the script.
 ## Help
 >>>uv run main.py --help
 give you the optional parameters you can manipulate 
-## Creating a new model
->>> uv run main.py --model-name "Model Name" 
+## Train Subcommand
+>>>uv run main.py train
+Used to create/load and train models
+### Creating a new model
+>>> uv run main.py train --model-name "Model Name" 
 Creates a new model for you to work with
-## Loading an existing model
->>> uv run main.py --model-name "Model Name" --load-existing
+### Loading an existing model
+>>> uv run main.py train --model-name "Model Name" --load-existing
 Loads an existing model
-## Quick run
->>> uv run main.py 
+### Quick run
+>>> uv run main.py train
 Loads the default_resnet18, training here will be overwritten the next time the default_resnet18 model is used so make sure to make a named model if you want to your weights to be permanently saved
-### Session Logging
+#### Session Logging
 All of the work that you do is saved in the applicable model_name within saved_models/, checkout the log file for the interesting information from what you just did
+## Test Subcommand
+>>> uv run main.py test --model-name "Model Name" 
+Tests the model against the withheld data, should only be done when you're completely done training the model
+## Plot Subcommand
+>>> uv run main.py plot --model-name "Model Name" 
+Plots the performance data accumulated from training a model
+## Autotrain Subcommand
+>>> uv run main.py autotrain --model-name "Model Name" 
+Creates and trains a model using the default settings for 10 epochs in head only then 10 epochs with layer4 and head training. Will rewrite the previous model if used on an existing model-name (does not stack)

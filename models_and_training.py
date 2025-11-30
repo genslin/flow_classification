@@ -5,6 +5,7 @@ from torchvision import models
 from pathlib import Path
 import pandas as pd
 import logging_functions as log
+import model_evaluation
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 PROJECT_ROOT = Path.cwd().resolve()
@@ -97,13 +98,7 @@ def unfreeze_last_block(model):
     return model
 
 
-def train_loop(
-    dataloader,
-    model,
-    loss_fn,
-    optimizer,
-    epoch,
-):
+def train_loop(dataloader, model, loss_fn, optimizer, epoch, head_only=True):
     size = len(dataloader.dataset)
     logger = log.get_model_logger(model.name)
     logger.info(f"Training model: {model.name}")
@@ -129,7 +124,13 @@ def train_loop(
 
         loss, current = loss.item(), batch * dataloader.batch_size + len(X)
         performance_data.append(
-            {"epoch": epoch, "batch": batch, "loss": loss, "current": current}
+            {
+                "epoch": epoch,
+                "batch": batch,
+                "loss": loss,
+                "current": current,
+                "head_only": head_only,
+            }
         )
         logger.info(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
     logger.info("Finished epoch")
@@ -139,24 +140,42 @@ def train_loop(
 def train_model_for_epochs(
     starting_epoch,
     number_of_epochs_to_train,
-    dataloader,
+    train_dataloader,
+    val_dataloader,
     model,
     loss_fn,
     optimizer,
     prior_performance_data=None,
+    head_only=True,
+    save_confusion_matrix=False,
 ):
     all_performance_data = (
         [] if prior_performance_data is None else list(prior_performance_data)
     )
     for epoch in range(starting_epoch, starting_epoch + number_of_epochs_to_train):
         model, performance_data = train_loop(
-            dataloader=dataloader,
+            dataloader=train_dataloader,
             model=model,
             loss_fn=loss_fn,
             optimizer=optimizer,
             epoch=epoch,
+            head_only=head_only,
         )
         all_performance_data.extend(performance_data)
+        confusion_matrix = model_evaluation.test_loop(
+            dataloader=val_dataloader,
+            model=model,
+            loss_fn=loss_fn,
+        )
+        if save_confusion_matrix:
+            plt_name = f"epoch_{epoch}_head_only_{head_only}"
+            model_evaluation.plot_confusion_matrix(
+                model=model,
+                cm=confusion_matrix,
+                plt_name=plt_name,
+                save_plot=True,
+                show_plot=False,
+            )
     return model, all_performance_data
 
 
@@ -170,16 +189,25 @@ def save_performance_data(performance_data, model):
     logger.info("Performance Data Saved")
 
 
-def load_performance_data(model):
+def load_performance_data(model, plot_only=False):
     subdirectory = SAVED_MODEL_DIR / model.name / "performance data"
     subdirectory.mkdir(parents=True, exist_ok=True)
     path = subdirectory / "performance_data.csv"
     logger = log.get_model_logger(model_name=model.name)
     if path.exists():
-        performance_data = pd.read_csv(path).to_dict(orient="records")
-        logger.info("Loaded performance data")
+        try:
+            performance_data = pd.read_csv(path).to_dict(orient="records")
+            if not plot_only:
+                logger.info("Loaded performance data")
+        except pd.errors.EmptyDataError:
+            performance_data = []
+            if not plot_only:
+                logger.info(
+                    "Performance data file was empty, starting new performance data record"
+                )
     else:
-        logger.info("New model, starting performance data record")
+        if not plot_only:
+            logger.info("New model, starting performance data record")
         performance_data = []
     return performance_data
 

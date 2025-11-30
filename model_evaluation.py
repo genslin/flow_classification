@@ -5,6 +5,7 @@ from sklearn.metrics import confusion_matrix
 import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 PROJECT_ROOT = Path.cwd().resolve()
@@ -97,4 +98,72 @@ def plot_confusion_matrix(model, cm, plt_name=None, save_plot=False, normalize=T
         plt.show()
 
     # Free the figure from memory
+    plt.close(fig)
+
+def load_performance_data_for_post_processing(model_name):
+    path = SAVED_MODEL_DIR / model_name / "performance data" / "performance_data.csv"
+    performance_data = pd.read_csv(path)
+    performance_data["batches_trained"] = performance_data["epoch"] * 20 + performance_data["batch"]
+    return performance_data
+
+def plot_performance_data(model, performance_data, save_plot=False, plot_name=None, headless=False):
+     # Convert to DataFrame
+    performance_data = pd.DataFrame(performance_data)
+
+    # Compute cumulative training steps — consider revisiting the 20 constant
+    performance_data["batches_trained"] = (
+        performance_data["epoch"] * 20 + performance_data["batch"]
+    )
+    
+    # Split by training mode
+    head_only_training = performance_data[performance_data["head_only"]]
+    layer4_training = performance_data[~performance_data["head_only"]]
+
+    # Build the figure
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    # Plot head-only
+    ax.plot(
+        head_only_training["batches_trained"],
+        head_only_training["loss"],
+        label="Head Only Training",
+        color="blue",
+    )
+
+    # Plot layer4+head — FIXED BUG
+    ax.plot(
+        layer4_training["batches_trained"],
+        layer4_training["loss"],
+        label="Layer4 + Head Training",
+        color="orange",
+    )
+
+    ax.set_xlabel("Batches Trained")
+    ax.set_ylabel("Loss")
+    ax.set_title(f"Training Loss Over Time ({model.name})")
+    ax.legend()
+    ax.grid(True)
+
+    # Build save directory
+    subdirectory = SAVED_MODEL_DIR / model.name / "performance_data"
+    subdirectory.mkdir(parents=True, exist_ok=True)
+
+
+    if save_plot:
+        # Determine filename
+        if plot_name is None:
+            path = subdirectory / "performance_data_plot.png"
+        else:
+            if not plot_name.endswith(".png"):
+                plot_name += ".png"
+            path = subdirectory / plot_name
+        # Save figure
+        fig.savefig(path, dpi=300)
+        print(f"Saved performance plot: {path}")
+
+    # Show or not
+    if not headless:
+        plt.show()
+
+    # Free memory
     plt.close(fig)
