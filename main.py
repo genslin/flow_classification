@@ -584,6 +584,8 @@ def run_test(args):
 
 
 def run_plot(args):
+    logger = log.get_model_logger(args.model_name)
+    logger.info("Loading model to retrieve performance data for plot")
     model = models_and_training.load_model(model_name=args.model_name, new_model=False)
     performance_data = models_and_training.load_performance_data(
         model=model, plot_only=True
