@@ -378,7 +378,7 @@ def run_train(args):
             logger.info(f"Training model head for {epochs_to_train} epochs")
 
             # Train the model for the requested number of epochs
-            model, performance_data = models_and_training.train_model_for_epochs(
+            model, performance_data, confusion_matrix = models_and_training.train_model_for_epochs(
                 starting_epoch=starting_epoch,
                 number_of_epochs_to_train=epochs_to_train,
                 train_dataloader=train_loader,
@@ -392,13 +392,6 @@ def run_train(args):
 
             # Update epoch index for next round
             starting_epoch += epochs_to_train
-
-            # Evaluate on validation set to check progress
-            confusion_matrix = model_evaluation.test_loop(
-                dataloader=val_loader,
-                model=model,
-                loss_fn=loss_fn,
-            )
 
             # Optionally plot/save confusion matrix
             plot_matrix = (
@@ -461,7 +454,7 @@ def run_train(args):
             logger.info(f"Training model head and layer4 for {epochs_to_train} epochs")
 
             # Train for this round
-            model, performance_data = models_and_training.train_model_for_epochs(
+            model, performance_data, confusion_matrix = models_and_training.train_model_for_epochs(
                 starting_epoch=starting_epoch,
                 number_of_epochs_to_train=epochs_to_train,
                 train_dataloader=train_loader,
@@ -474,13 +467,6 @@ def run_train(args):
             )
 
             starting_epoch += epochs_to_train
-
-            # Validate after this round
-            confusion_matrix = model_evaluation.test_loop(
-                dataloader=val_loader,
-                model=model,
-                loss_fn=loss_fn,
-            )
 
             # Optional confusion matrix plotting
             plot_matrix = (
@@ -682,7 +668,7 @@ def run_autotrain(args):
     logger.info(f"Training model head for {epochs_to_train} epochs")
 
     # Train the model for the requested number of epochs
-    model, performance_data = models_and_training.train_model_for_epochs(
+    model, performance_data, confusion_matrix = models_and_training.train_model_for_epochs(
         starting_epoch=starting_epoch,
         number_of_epochs_to_train=epochs_to_train,
         train_dataloader=train_loader,
@@ -712,7 +698,7 @@ def run_autotrain(args):
     logger.info(f"Training model head and layer4 for {epochs_to_train} epochs")
 
     # Train for this round
-    model, performance_data = models_and_training.train_model_for_epochs(
+    model, performance_data, confusion_matrix = models_and_training.train_model_for_epochs(
         starting_epoch=starting_epoch,
         number_of_epochs_to_train=epochs_to_train,
         train_dataloader=train_loader,

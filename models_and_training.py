@@ -176,7 +176,7 @@ def train_model_for_epochs(
                 save_plot=True,
                 show_plot=False,
             )
-    return model, all_performance_data
+    return model, all_performance_data, confusion_matrix
 
 
 def save_performance_data(performance_data, model):
